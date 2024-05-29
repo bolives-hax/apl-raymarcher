@@ -69,8 +69,10 @@
         });
       in {
 
-        packages.waylandRunner = pkgs.writeShellScriptBin "apl-raymarcher-wayland-runner"
-          "${dyalog}/bin/dyalogscript ${aplWayland}";
+        packages.waylandRunner = pkgs.writeShellScriptBin "apl-raymarcher-wayland-runner" ''
+              LD_LIBRARY_PATH = "${lib.makeLibraryPath [wayland]}"
+              ${dyalog}/bin/dyalogscript ${aplWayland}
+        '';
         packages.pngRunner = pkgs.writeShellScriptBin "apl-raymarcher-png-runner"
           "${dyalog}/bin/dyalogscript ${aplPng}";
 
