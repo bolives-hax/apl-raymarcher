@@ -1,7 +1,8 @@
 # apl-raymarcher
 Raymarcher written in dyalog APL, using pixel plotting helpers using rust and nix for build management
 
-### more info at (TODO link blog article)
+### more info at
+(https://bolives-hax.github.io/Blog/raymarching-in-dyalog-apl/)
 
 ## exporting to png
 ```bash
