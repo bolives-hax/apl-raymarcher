@@ -70,7 +70,7 @@
       in {
 
         packages.waylandRunner = pkgs.writeShellScriptBin "apl-raymarcher-wayland-runner" ''
-              LD_LIBRARY_PATH = "${lib.makeLibraryPath [wayland]}"
+              export LD_LIBRARY_PATH="${lib.makeLibraryPath [wayland libxkbcommon libGL]}"
               ${dyalog}/bin/dyalogscript ${aplWayland}
         '';
         packages.pngRunner = pkgs.writeShellScriptBin "apl-raymarcher-png-runner"
