@@ -1,0 +1,19 @@
+[package]
+name = "apl_window_draw_helper"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+softbuffer = "0.4.2"
+# V do we need this even?
+libc = "0.2.153"
+color-eyre = "0.6.3"
+winit = "0.30.0"
+png = "0.17.13"
+
+
+[lib]
+name         = "apl_window_draw_helper"
+## V this is needed in order to create a .so that apl
+## requires for linux targets
+crate-type   = ["rlib", "cdylib"]
