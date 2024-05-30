@@ -6,7 +6,8 @@ Raymarcher written in dyalog APL, using pixel plotting helpers using rust and ni
 
 ## exporting to png
 ```bash
-nix run github:bolives-hax/apl-raymarcher#waylandRunner --no-write-lock-file
+nix run github:bolives-hax/apl-raymarcher#pngRunner --no-write-lock-file
+# output will we placed in cwd as rendering.png
 ```
 
 note that you'd need to clone the repo and change the resolution in flake.nix
