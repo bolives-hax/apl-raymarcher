@@ -2,7 +2,17 @@
   description = "flake building raymarcher written in dyalog apl + rust plotting helpers";
 
   inputs = {
-    nixpkgs.url      = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs = {
+      #url = "path:/home/flandre/nixpkgs";
+    # use below if you don't have the fork of the dyalog drv
+    # present locally (takes a while to download) OR wait until the PR is merged
+    # i touched on what this fix does in the introduction of the apl raymarcher isolate
+    # blogpost linked in the readme
+      url = "https://github.com/TomaSajt/nixpkgs.git";
+      type = "git";
+      ref = "dyalog";
+      rev = "0ea7fe9f11803bea5fd9f6b2ecd96fd96b0731e7";
+    };
     flake-utils.url  = "github:numtide/flake-utils";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
@@ -33,8 +43,13 @@
         #  };
         #};
 
-        xres = 130;
+        xres = 120;
         yres = 100;
+
+        # TODO V don't hardcode this here but instead
+        # read it out of a variable at runtime
+        # along with the out path
+        threads = 4;
       in with pkgs; let
           rustPlatform = makeRustPlatform {
             cargo = rust-bin.selectLatestNightlyWith (toolchain: toolchain.default);
@@ -57,10 +72,15 @@
         aplPng = pkgs.writeTextFile {
           name = "apl-raymarcher-png";
           text = ''
-            drawlib_path←'${drawlib}/lib/libapl_window_draw_helper.so'
-            png_xres←${toString xres} ⋄ png_yres←${toString yres}
+            ⍝ this does nothing
+            ⎕LOAD 'isolate' ⍝ (for now loaded via the nix expression)
+
             png_outpath←'lol.png'
+            drawlib_path←'${drawlib}/lib/libapl_window_draw_helper.so'
+            png_xres←${toString xres}
+            png_yres←${toString yres}
             draw_backend←'png'
+            threads←${toString threads}
             ${builtins.readFile ./raymarcher.apl}
           '';
         };

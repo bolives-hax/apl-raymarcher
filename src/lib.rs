@@ -34,7 +34,6 @@ fn try_draw_png(xres: c_uint, yres: c_uint, buf: *const c_float) -> Result<()> {
     use std::fs::File;
     use std::io::BufWriter;
 
-    println!("t");
     let pixcount: usize  = (xres * yres).try_into()?;
     let rgbcount = pixcount * 3;
 
@@ -50,7 +49,6 @@ fn try_draw_png(xres: c_uint, yres: c_uint, buf: *const c_float) -> Result<()> {
                 0x0
             } else {
                 let c: u32 = c as _;
-                println!("{c}");
                 c.try_into().unwrap() 
             }
     }).collect::<Vec<u8>>();
@@ -110,7 +108,6 @@ struct Shared<D,W> {
 
 fn try_init_drawer() -> Result<*const c_void> {
     use winit::platform::wayland::EventLoopBuilderExtWayland;
-    println!("eee");
     let event_loop = EventLoopBuilder::new()
         .with_any_thread(true)
         .build()?;

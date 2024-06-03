@@ -1,11 +1,42 @@
+⍝ provides methods/operators from the isolate namespace
+⍝ which allows us to run compute jobs split across multiple threads/cpu cores 
+⍝ or even (in the future) across nodes of a cluster. It also provides
+⍝ some helpers for working with futures which will come in handy later
+⍝ for example for procedually improving resolution with each sample point
+⍝ and other things where an asynchronous mode of operation would offer
+⍝ benefits TODO make this optional by supporting the old method
+⍝ found in the previous commits
+⍝ ⎕LOAD 'isolate' (for now loaded via the nix expression)
+
 ⍝  NOTE 
 ⍝  NOTE  if using without nix you need to manually set these variables
 ⍝  NOTE 
 ⍝            png_xres←100 ⋄ png_yres←120
 ⍝            png_outpath←'lol.png'
 ⍝            draw_backend←'png'
-⍝            drawlib_path←'/nix/store/7hpvv8dd37jiamgp2m1yxgjrkg3gb5m9-apl-raymarcher-drawlib-1.0.0libapl_window_draw_helper.so'
+⍝            drawlib_path←'/nix/store/7hpvv8dd37jiamgp2m1yxgjrkg3gb5m9-apl-raymarcher-drawlib-1.0.0/lib/libapl_window_draw_helper.so'
 ⍝                            ^ path to the .so shared library  for the png/wayland surface helpers
+⍝ variable denoting the number of threads/workers to use. For now
+⍝ this needs to either be manually specified / trough the nix drv
+⍝ but I plan to read it out trough an environment variable
+⍝ also offering the legacy method for systems where isolates (TODO)
+⍝ cant be used yet
+⍝ threads←4
+
+
+⍝ TODO respect this by passing it as a C-string from apl to the helper
+⍝ for now the image using the png backend will be place into rendering.png
+⍝ png_outpath←'lol.png'
+
+⍝ set the max amount of isolates to what the user specified rather
+⍝ than forcing it to be equal to the amount of cores. While there isn't
+⍝ any point to increasing it past the number of cores I still think
+⍝ the user should be able to control it also it can be useful in tests
+isolate.Config 'isolates' threads
+
+⍝⍝⍝ obsolete TODO remove though maybe useful for refecence (just for myself)
+⍝⍝⍝thread2pix←{thread←(⍵) ⋄ {thread + ((⍵-1)×threads)}¨⍳per_thread}¨⍳threads
+⍝⍝⍝thread2pix←{(remainder-⍵) < 0: ⊃(thread2pix[⍵]) ⋄ (⊃(thread2pix[⍵])) ,(xres-remainder-⍵)}¨⍳threads
 
 
 'draw_png'⎕NA (⊃,/{'U4 ' ⍵ '|draw_png  U4 U4 <F4[]'} drawlib_path)
@@ -32,12 +63,20 @@ drawer_context←{
 
 xres←drawer_context[1] ⋄ yres←drawer_context[2] 
 
+⍝ renderer namespace containing everything specific to the 
+⍝ actual rendering process (mostly mathematical primitives/formulas/constants)
+⍝ and so on. This is not only cleaner and more flexible if lets say we wanted
+⍝ to turn the renderer into a library or define multiple rendering contexts
+⍝ but also needed for isolates to split workloads across cores/threads/nodes
+⍝ this line creates an empty namespace we then move for example the sqrt function
+⍝ into via renderer.sqrt← or renderer.cam_origin to define the camera origin
+⍝ TODO also consider moving this into a separte file as its ween that nicely isolated
+renderer←⎕NS ''
 
-
+⍝ couldn't get this to display correctly if run non interactively
 ⍝⎕SE.UCMD 'BOX on'
 
 
-cam_origin←(0 0 ¯1)
 
 ⍝ 2 fields (x,y) for each pixel on the screen
 xy←{((⍳(xres))-1)⍵}¨((⍳(yres))-1)
@@ -51,36 +90,29 @@ uv←_uv-0.5
 ⍝ apply aspect ratio to uv
 uv←{⊃((⍵[1] ÷ (xres ÷ yres)) ⍵[2])}¨uv
 
-uv_vecs ← ⊃,/{y←⍵[2] ⋄ {⍵ (-y)}¨(⊃⍵[1]) }¨uv
-
-
-
-epsi←0.0001
 
 ⍝ n-th sqrt value
 ⍝   ⍵ -> value
 ⍝   ⍵ -> nth-root
-sqrt←{⍵*÷⍺}
+renderer.sqrt←{⍵*÷⍺}
 
 ⍝ vector length
-length←{2 sqrt (+/{⍵*2}¨⍵)}
+renderer.length←{2 sqrt (+/{⍵*2}¨⍵)}
 
 ⍝ normalize vector
-norm←{o ← ⍵ ⋄ v ← +/{⍵*2}¨o ⋄ w← 2 sqrt v ⋄ {⍵÷w}¨o}
+renderer.norm←{o ← ⍵ ⋄ v ← +/{⍵*2}¨o ⋄ w← 2 sqrt v ⋄ {⍵÷w}¨o}
 
-⍝ place cam at 0,0,-1
-cam_origin←(0 0 ¯1)
 
 
 
 ⍝⍺ ->  value to colapm
 ⍝w -> [ min , max]
-clamp←{(⍵[2]) ⌊ ( (⍵[1])⌈⍺ )}
+renderer.clamp←{(⍵[2]) ⌊ ( (⍵[1])⌈⍺ )}
 
 
 ⍝ a -> interpolation factor
 ⍝ w -> [lower_end upper_end] 
-lin_interpol←{
+renderer.lin_interpol←{
 	le←⊃(⍵[1])
 	ue←⊃(⍵[2])
 	le × ( 1 - ⍺ ) + ue × ⍺
@@ -100,7 +132,7 @@ blend_broken←{
 
 ⍝ a -> blend factor
 ⍝ w[dist1 dist2] sdfs to blend
-blend←{
+renderer.blend←{
 	d_a←⊃⊃⍵[1]
 	d_b←⊃⊃⍵[2]
 	h← ( 0.5 + 0.5 × ((d_b - d_a)÷⍺)) clamp (0.0 1.0)
@@ -108,20 +140,20 @@ blend←{
 }
 
 ⍝ a = radius, w = position
-ball_sdf←{  (length ⍵) - ⍺ }
+renderer.ball_sdf←{  (length ⍵) - ⍺ }
 
 ⍝ w = p , n , h
-inf_plane_floor←{
+renderer.inf_plane_floor←{
 	((norm ⍺) dot (⊃⍵[1]) ) +  ⊃⍵[2]
 }
 
 
 ⍝ a = diameter, w =  position 
-octahedron_sdf←{ 0.57735027 × ( {+/(|⍵)} ⍵) - ⍺ }
+renderer.octahedron_sdf←{ 0.57735027 × ( {+/(|⍵)} ⍵) - ⍺ }
 
 ⍝ ⍵ -> p
 ⍝ ⍺ ( b , e)
-boxframe_sdf←{
+renderer.boxframe_sdf←{
 	p ← ( (|⍵) - (⊃⍺[1]))
 	q ← ((|(p + (⊃⍺[2]))) - (⊃⍺[2]))
 
@@ -160,33 +192,33 @@ box_sdf←{
 
 ⍝ ⍵  = p
 ⍝ ⍺  = [ b(x y z) , r ]
-rounded_box_sdf←{
+renderer.rounded_box_sdf←{
 	b← ⊃(⍺[1])
 	r← ⊃(⍺[2])
 	q ← (|⍵) - (b[1]) + (r)
 	(length  ( q ⌈ 0)) +   ( 0 ⌊ (  ( (q[2])  ⌈ (q[3]))  ⌈ (q[1]))) - (r)
 }
 
-torus_sdf←{
+renderer.torus_sdf←{
 	q←((length ( (⍵[1]) (⍵[3]) ))  - (⍺[1]))  (⍵[2])
 	(length q) - (⍺[2])
 }
 
-scene_obj1_ball←1 
-scene_obj2_octa←2
-scene_obj3_melted_balls←3
-scene_obj4_floor←4
-scene_obj5_frame←5
-scene_obj6_ball←6
-scene_obj7_torus←7
-scene_obj8_rounded_box←8
+renderer.scene_obj1_ball←1 
+renderer.scene_obj2_octa←2
+renderer.scene_obj3_melted_balls←3
+renderer.scene_obj4_floor←4
+renderer.scene_obj5_frame←5
+renderer.scene_obj6_ball←6
+renderer.scene_obj7_torus←7
+renderer.scene_obj8_rounded_box←8
 ⍝
 ⍝	TODO TODO TODO TODO when marching it 
 ⍝ 	is better than not using abs as that wiill add precision
 ⍝        ((|d)< 0.001 ^ t>max_dist:
 
 ⍝ ⍵ ← p
-sdf←{
+renderer.sdf←{
 	ball1 ← 0.5 ball_sdf (⍵ - ( 0 ¯1 4) )
 
 	melted_balls2 ← {
@@ -219,7 +251,7 @@ sdf←{
 
 ⍝ ⍺ = [ total_dist , ro , rd , max_steps, max_dist ]
 ⍝ ⍵ = stepcount
-march←{
+renderer.march←{
 	total_dist ← ⍺[1]
 	ro ← ⊃⍺[2] 
 	rd ← ⊃⍺[3]
@@ -245,17 +277,17 @@ march←{
 
 ⍝ ⍺ = vector a
 ⍝ ⍵ = vector b 
-dot←{+/(⍵×⍺)}
+renderer.dot←{+/(⍵×⍺)}
 
 ⍝ ⍺  -> incident vector
 ⍝ ⍵  -> normal vector
 ⍝ I - 2.0 * dot(N, I) * N.
-reflect←{
+renderer.reflect←{
 	⍺ - 2.0 × ( ⍵ dot ⍺) × ⍵
 }
 
 ⍝ ⍵ =p
-estNormal←{
+renderer.estNormal←{
 	e←epsi
 	_sdf←{(sdf ⍵)[1]}
 
@@ -283,7 +315,7 @@ estNormal←{
 
 ⍝ ⍺ = [ ambient_color(rgb), diffuse_color(rgb), specular_color(rgb), alpha, light_intensity ]
 ⍝ ⍵ = [ p ro ]
-phongLight←{
+renderer.phongLight←{
 	p←⊃⍵[1]
 	ro←⊃⍵[2]
 
@@ -326,15 +358,15 @@ phongLight←{
 
 }
 
-checkers←{
+renderer.checkers←{
 	size←⍺
 	pos_x←  ⌊ (  (⍵[1]) ÷ size)
 	pos_y← ⌊ (  (⍵[2]) ÷ size)
 	3 ⍴ (2.0 | (pos_x + (2.0 | pos_y)))
 }
 
-⍝ this is more of a grid tbh
-checkers_ball←{
+⍝ this is more of a grid tbh TODO rename
+renderer.checkers_ball←{
 	si←2
 	ox←⍵[1]
 	oy←⍵[1] + ⍵[2]
@@ -348,7 +380,7 @@ checkers_ball←{
 
 
 ⍝ ⍵ = [ total_dist , ro , rd , obj]
-phong←{
+renderer.phong←{
 	total_dist←⊃⍵[1]
 	ro←⊃⍵[2]
 	rd←⊃⍵[3]
@@ -467,7 +499,7 @@ phong←{
 
 }
 
-reflective_material←{
+renderer.reflective_material←{
 	ref_surface_p ← (⊃⍵[1])
 	ref_view_rd ← (⊃⍵[2])
 	ro ← (⊃⍵[3])
@@ -488,7 +520,7 @@ reflective_material←{
 
     	⍝ initiate raymarching once more but this time starting from the reflecting surface
     	⍝ using a slightly reduced  step count/max distance
-	ref_reflected_final  ← ( 0 ref_surface_p ref_reflected_rd 70 150) march 0
+	ref_reflected_final  ← ( 0 ref_surface_p ref_reflected_rd 100 100) march 0
 
 	⍝ 1 if the reflected ray hit anything, otherwise 0 
 	hit←(ref_reflected_final[1])
@@ -512,7 +544,7 @@ reflective_material←{
 	⍝ enhance obj reflecitons while not reflecting the background too much but thats ofc just a hack
 }
 
-sky←{
+renderer.sky←{
 	dawn←(0.4 (0.4 - (2.67 * (⍵[2]  × ¯20.0 )) × 0.15) 0)  × ( 2.67 * ( ⍵[2] × ¯9))
 	sky←(0.3 0.5 0.6) × ( 1.0 - (2.67 * (⍵[2] × ¯8.0))) × (2.67 * (⍵[2] ×  ¯0.9))
 
@@ -522,44 +554,105 @@ sky←{
 }
 
 ⍝ ⍵ = [ cam_dir time bg ]
-rgb←{
+renderer.rgb←{
 	cam_dir←⊃⍵[1]
 	time←⊃⍵[2]
-	d←(( 0 cam_origin  cam_dir 75 200) march 0)
+	d←(( 0 cam_origin  cam_dir 100 100) march 0)
 	hit←d[1]
-
+	⍝
 	⍝ 	phong ( total_dist , ro , rd , obj)
-
+	⍝
 	hit=1: phong ((d[2]) cam_origin cam_dir (d[3]))  
 
 	⍝ If nothing was hit the `sky` function will be called
 	⍝ returning the rgb components of the background for the given point
-
+	⍝
 	(sky cam_dir[1] (0 ⌈ ((cam_dir[2])+0.12)))
 }
+
+⍝ place cam at 0,0,-1
+renderer.cam_origin←(0 0 ¯1)
+
+renderer.epsi←0.0001
 
 
 ⎕←'rendering @ resolution' xres 'x' yres
 
 s←{
 	t←⍵
-	pixbuf_rgb←{
-		y←⍵[2]
-		⍝ cheap progress bar derived from each line drawn
-		x←{⍵=-0.5: {⎕←'rendered' (100 + (y+0.5) × -100) '%' ⋄ ⍵}  ⍵ ⋄ ⍵}⍵[1]
-		cam_dir←norm x y 1
-		(rgb cam_dir t )
-	}¨uv_vecs
 
+	uv_vecs←⊃,/{y←⍵[2] ⋄ { ⍵ y}¨(⊃⍵[1])}¨uv
+
+
+	per_thread←⌊((xres×yres)  ÷ threads)
+
+	⍝ TODO covert cases where (xres × yres) ÷ threads
+	⍝ is not even by using the variable below and assigning
+	⍝ the uneven pixel compute jobs as evenly as possible
+	⍝ cause as for now lets say we had a resolution of 11*13=143
+	⍝ at 2 or 4 threads wed have 1 remaining pixel we would need
+	⍝ to split on one of the 2 workers
+	⍝ remainder←(threads | (xres × yres))
+
+	⍝ splits the pixels uv coordinate mappens we calculated
+	⍝ above evenly across the threads. In order to make the
+	⍝ required functions and variables accessible while keeping
+	⍝ everything simple and readable Ive moved the variables into a
+	⍝ namespace named renderer which contains all primitives/formulas
+	⍝ helpers and constants required for rendering the image
+	⍝ As we are instead of moving everything into there (which wouldn't even work
+	⍝ for me) moving instead a subset of only the required information contained within 
+	⍝ its own namespace has less overhead and also simplifies things a little as now
+	⍝ its quite easy to separate everything properly
+	⍝
+	⍝ TODO account for uneven pixel/thread count
+	uv_isolates←{
+		threadno←⍵
+		⍝ copy th renderer namespace to pass it to the isolate below
+		thread_ns←renderer
+		thread_ns.per_isolate_uv←{
+			⊃(uv_vecs[threadno + ((⍵-1) × threads)])
+		}¨⍳per_thread
+
+		ø thread_ns
+	}¨⍳threads ⍝ create "threads" number of isolates each equipped with a copy of the renderer
+	⍝ namespace which gives access to shared variables/functions and copy the thread-specific
+	⍝ uv coordinates into the namespace copy thats respective the the threadno (1 to "threads")
+
+	⍝ run the isolates by putting the uv coordinates we mapped onto the threads above
+	⍝ into the rgb function and running that within the isolate context
+	⍝ (everything in the "()" round brackets section like the rgb call is actually already run
+	⍝ in the isolate using the namespace created/copied above
+	⍝ TODO consider outsourcing this  to simplyfy this function call
+	⍝ and make it more readable
+	piix←uv_isolates.({x←⍵[1] ⋄ y←⍵[2] ⋄ rgb(norm(x (-y) 1) )1}¨per_isolate_uv)
+
+
+	⍝ after the isolates ran, re need to map the output of the respective isolates
+	⍝ pixels back into their order so we essentially apply the reverse from what we applied
+	⍝ when we partitioned the uv coordinates for the respective pixels onto the threads/isolates
+	pixbuf_rgb←⊃,/{
+		pixno←⍵
+		{
+			thread←⍵
+			⊃((⊃(piix[thread]))[pixno])
+		}¨⍳threads
+	}¨⍳per_thread
+
+	
 	draw_backend≡'png': {
 		pixbuf_rgb←⊃,/pixbuf_rgb
-		⍝⎕←'drawing' (⍴ pixbuf_rgb) 'pixel rgba values (' xres  'x' yres ')=' ( xres × yres ) into '  ⍵
+		⎕←'drawing' (⍴ pixbuf_rgb) 'pixel rgba values (' xres  'x' yres ')=' ( xres × yres ) ' into '  ⍵
 		draw_png xres yres pixbuf_rgb
 	}  png_outpath
 
 	draw_backend≡'wayland': {
+		⍝ the winit library seems to expect pixels in the rgba arrangement unlike the png
+		⍝ runner thus we just place a 0 on the end. This would likely be faster if done within
+		⍝ the helper directly
 		pixbuf_rgba←⊃,/{⍵,0}¨pixbuf_rgb
-		⎕←drawer_context
+		⍝ TODO respond to dimension changes and possible allow rendering multiple frames
+		⍝⎕←drawer_context
 		draw_window drawer_context[3] xres yres  pixbuf_rgba
 
 	}¨⍳1 ⍝ for now just draw one frame
@@ -567,8 +660,10 @@ s←{
 } draw_backend
 
 ⎕←'press return to quit'
-⍞
-
+⍞ ⍝ TODO consider telling the user how long the computation took
+⍝ or when using multiple frames maybe even a per-frame statistic so they don't have to perf the command itself
+⍝ and remove that line in the end but for the wayland runner the drawing context would close upon APL terminating
+⍝ so we have that here
 
 
 
